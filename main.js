@@ -128,7 +128,7 @@ pmremGenerator.compileEquirectangularShader();
 const loader = new GLTFLoader();
 
 loader.load(
-  '/models/cafe_no_door.glb',
+  '/models/joyce_cafe_no_door.glb',
   function (gltf) {
     const pusheenCafe = gltf.scene;
     pusheenCafe.scale.set(10, 10, 10);
