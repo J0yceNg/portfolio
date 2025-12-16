@@ -77,9 +77,28 @@ const player = new THREE.Object3D();
 player.position.set(0, 0, 20);
 scene.add(player);
 
-// Camera height relative to character
-const headOffset = new THREE.Vector3(0, 12, 0);
+// --- VISUAL DEBUG: Pink Orb & Direction Arrow ---
+// 1. The Orb (Player Body)
+const orbGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+const orbMaterial = new THREE.MeshBasicMaterial({ 
+    color: 0xff00ff, // Pink
+    wireframe: true  // Wireframe lets you see through it slightly
+});
+const playerOrb = new THREE.Mesh(orbGeometry, orbMaterial);
+playerOrb.position.y = 1.5; // Raise slightly so it sits ON the grass, not inside it
+player.add(playerOrb);
 
+// 2. The Arrow (Facing Direction)
+// We point it towards negative Z (which is "Forward" in Three.js local space)
+const arrowDir = new THREE.Vector3(0, 0, -1); 
+const arrowOrigin = new THREE.Vector3(0, 1.5, 0); // Start arrow from center of orb
+const arrowLength = 6;
+const arrowColor = 0xffff00; // Yellow stands out well against pink/green
+const playerArrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, arrowLength, arrowColor);
+player.add(playerArrow);
+
+// Camera height relative to character (Eyes are above the orb)
+const headOffset = new THREE.Vector3(0, 12, 0);
 
 // --- Ground Plane Setup (Grass and Flowers) ---
 
@@ -307,20 +326,29 @@ function setMode(newMode) {
 
   if (mode === 'FPS') {
     controls.enabled = false;
-    // Sync Player to current Camera position
-    player.position.set(camera.position.x, 0, camera.position.z);
     
-    // Sync Yaw to Camera direction
-    const fwd = new THREE.Vector3();
-    camera.getWorldDirection(fwd);
-    yaw = Math.atan2(fwd.x, fwd.z);
-    pitch = 0;
+    // 1. Snap Camera to Player
+    camera.position.copy(player.position).add(headOffset);
+    
+    // 2. CRITICAL FIX: Reset Rotation Order and FORCE Z (Roll) to 0
+    // This prevents the "Upside Down" glitch
+    camera.rotation.order = "YXZ";
+    camera.rotation.x = pitch;
+    camera.rotation.y = yaw;
+    camera.rotation.z = 0; // Ensure we are level
+    
+    // 3. Reset the Up Vector (Just in case OrbitControls flipped it)
+    camera.up.set(0, 1, 0);
 
   } else {
+    // Switch to ORBIT
     controls.enabled = true;
+    
+    // Set target in front of camera
     const fwd = new THREE.Vector3();
     camera.getWorldDirection(fwd);
     controls.target.copy(camera.position).add(fwd.multiplyScalar(20));
+    
     controls.update();
   }
 }
@@ -377,7 +405,6 @@ function updatePlayerAndCamera() {
     const right = new THREE.Vector3();
     right.crossVectors(forward, camera.up).normalize();
 
-    // WASD Movement
     if (keyState['KeyW'] || keyState['ArrowUp']) move.add(forward);
     if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
     if (keyState['KeyD'] || keyState['ArrowRight']) move.add(right);
@@ -386,8 +413,7 @@ function updatePlayerAndCamera() {
     // Q/E Movement
     if (keyState['KeyE']) move.y += 1;
     if (keyState['KeyQ']) {
-        // FIX: Only allow moving down if we are above the floor limit (0.5)
-        if (camera.position.y > 0.5) {
+        if (camera.position.y > 0.1) {
             move.y -= 1;
         }
     }
@@ -395,19 +421,14 @@ function updatePlayerAndCamera() {
     if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(moveSpeed);
         
-        // PREDICTIVE CLAMP:
-        // Check if this move would push us underground
+        // PREDICTIVE CLAMP (Orbit)
         if (camera.position.y + move.y < 0.5) {
-            // If it would, just set Y to the floor exactly
-            const distanceToFloor = 0.5 - camera.position.y;
-            // Move Y is negative, so we limit it to the remaining distance
-            // Actually, simplest is to just zero out the Y component if we are too low
             move.y = 0; 
-            camera.position.y = 0.5; // Snap to floor
+            camera.position.y = 0.5; 
         }
 
         camera.position.add(move);
-        controls.target.add(move); // Now target stops when camera stops!
+        controls.target.add(move); 
     }
   } 
 
@@ -428,7 +449,7 @@ function updatePlayerAndCamera() {
         move.normalize().multiplyScalar(moveSpeed);
         player.position.add(move);
 
-        // FPS Clamp (Feet on ground)
+        // FPS Clamp
         if (player.position.y < 0) {
             player.position.y = 0;
         }
@@ -437,9 +458,12 @@ function updatePlayerAndCamera() {
     // Sync Camera
     player.rotation.y = yaw;
     camera.position.copy(player.position).add(headOffset);
+    
+    // FORCE UPRIGHT ORIENTATION
     camera.rotation.order = "YXZ";
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
+    camera.rotation.z = 0; // Always force roll to 0
   }
 }
 
@@ -452,7 +476,7 @@ infoDiv.style.color = 'white';
 infoDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
 infoDiv.style.padding = '10px';
 infoDiv.style.fontFamily = 'monospace';
-infoDiv.style.pointerEvents = 'none'; // Click-through
+infoDiv.style.pointerEvents = 'none'; 
 document.body.appendChild(infoDiv);
 
 function updateDevUI() {
@@ -462,13 +486,11 @@ function updateDevUI() {
 
     let tx, ty, tz;
 
-    // Calculate "Target" based on current mode
     if (mode === 'ORBIT') {
         tx = controls.target.x.toFixed(2);
         ty = controls.target.y.toFixed(2);
         tz = controls.target.z.toFixed(2);
     } else {
-        // In FPS mode, calculate a virtual target 20 units in front
         const fwd = new THREE.Vector3();
         camera.getWorldDirection(fwd);
         const target = camera.position.clone().add(fwd.multiplyScalar(20));
@@ -488,12 +510,11 @@ function updateDevUI() {
         <small>Press 'P' to log to console</small>
     `;
 
-    // Handle 'P' Key to Print
     if (keyState['KeyP']) {
         console.log(`// ${mode} Snapshot`);
         console.log(`const pos = new THREE.Vector3(${px}, ${py}, ${pz});`);
         console.log(`const target = new THREE.Vector3(${tx}, ${ty}, ${tz});`);
-        keyState['KeyP'] = false; // Prevent console spam
+        keyState['KeyP'] = false; 
     }
 }
 
@@ -502,7 +523,7 @@ function animate() {
   TWEEN.update();
   
   updatePlayerAndCamera();
-  updateDevUI(); // <--- Add this line
+  updateDevUI(); 
   
   if (mode === 'ORBIT') controls.update();
   renderer.render(scene, camera);
@@ -510,11 +531,9 @@ function animate() {
 
 // 5. Handle Window Resize
 window.addEventListener('resize', () => {
-  // Update camera aspect ratio
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  // Update renderer size
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-animate(); // Start the animation loop
+animate();
