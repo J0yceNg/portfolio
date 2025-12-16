@@ -384,6 +384,10 @@ function updatePlayerAndCamera() {
     if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
     if (keyState['KeyD'] || keyState['ArrowRight']) move.add(right);
     if (keyState['KeyA'] || keyState['ArrowLeft']) move.sub(right);
+    
+    // Q and E for Up/Down
+    if (keyState['KeyE']) move.y += 1;
+    if (keyState['KeyQ']) move.y -= 1;
 
     if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(moveSpeed);
@@ -399,8 +403,14 @@ function updatePlayerAndCamera() {
 
     if (keyState['KeyW'] || keyState['ArrowUp']) move.add(forward);
     if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
-    if (keyState['KeyD'] || keyState['ArrowRight']) move.add(right);
-    if (keyState['KeyA'] || keyState['ArrowLeft']) move.sub(right);
+    
+    // FIX: Inverted the add/sub logic for A/D here
+    if (keyState['KeyD'] || keyState['ArrowRight']) move.sub(right); // Now moves Right
+    if (keyState['KeyA'] || keyState['ArrowLeft']) move.add(right);  // Now moves Left
+    
+    // Q and E for Up/Down (Levitation)
+    if (keyState['KeyE']) move.y += 1;
+    if (keyState['KeyQ']) move.y -= 1;
 
     if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(moveSpeed);
