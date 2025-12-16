@@ -225,8 +225,8 @@ let mode = 'ORBIT'; // 'ORBIT' or 'FPS'
 let isCameraSequencing = false; // Flag to pause controls during door animation
 
 const keyState = {};
-const moveSpeed = 0.6;
-const lookSpeed = 0.002;
+const moveSpeed = 0.5;
+const lookSpeed = 0.005;
 
 // yaw = character turning, pitch = looking up/down
 let yaw = 0;

@@ -1,6 +1,7 @@
 # portfolio
 
 Ideas list:
+- clickable object interaction
 - glowing shimmer around pastries and items
 - pastries for project
 - one table for school clubs, research, etc
