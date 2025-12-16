@@ -63,15 +63,13 @@ directionalLight.position.set(5, 10, 7.5);
 scene.add(directionalLight);
 scene.add(directionalLight.target);
 
-// 4. Controls: Allows you to move the camera with the mouse
+// 4. Controls
 const controls = new OrbitControls(camera, renderer.domElement);
 
-controls.target.set(0, 10, 0); // Focus the camera on the center-mass of the cafe (approx. 4 units up)
-controls.maxPolarAngle = Math.PI / 2 + 0.1; // 90 degrees + a slight downward tilt
-controls.update();
+controls.target.set(0, 10, 0); 
 
-controls.target.set(0, 10, 0);
-controls.maxPolarAngle = Math.PI / 2 + 0.1;
+controls.maxPolarAngle = Math.PI / 2 - 0.01;
+
 controls.update();
 
 // --- PLAYER / CHARACTER ---
@@ -329,7 +327,7 @@ function setMode(newMode) {
 
 window.addEventListener('keydown', (e) => {
   keyState[e.code] = true;
-  if (e.code === 'KeyC') setMode(mode === 'ORBIT' ? 'FPS' : 'ORBIT');
+  if (e.code === 'KeyM') setMode(mode === 'ORBIT' ? 'FPS' : 'ORBIT');
   if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
 }, { passive: false });
 
@@ -366,12 +364,11 @@ renderer.domElement.addEventListener('pointerup', () => pointerDown = false);
 
 // --- MAIN UPDATE LOOP ---
 function updatePlayerAndCamera() {
-  // If door sequence is playing, disable manual movement
   if (isCameraSequencing) return;
 
   const move = new THREE.Vector3();
 
-  // MODE A: ORBIT (Flying Camera)
+  // --- MODE A: ORBIT (Flying Camera) ---
   if (mode === 'ORBIT') {
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
@@ -380,42 +377,64 @@ function updatePlayerAndCamera() {
     const right = new THREE.Vector3();
     right.crossVectors(forward, camera.up).normalize();
 
+    // WASD Movement
     if (keyState['KeyW'] || keyState['ArrowUp']) move.add(forward);
     if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
     if (keyState['KeyD'] || keyState['ArrowRight']) move.add(right);
     if (keyState['KeyA'] || keyState['ArrowLeft']) move.sub(right);
     
-    // Q and E for Up/Down
+    // Q/E Movement
     if (keyState['KeyE']) move.y += 1;
-    if (keyState['KeyQ']) move.y -= 1;
+    if (keyState['KeyQ']) {
+        // FIX: Only allow moving down if we are above the floor limit (0.5)
+        if (camera.position.y > 0.5) {
+            move.y -= 1;
+        }
+    }
 
     if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(moveSpeed);
+        
+        // PREDICTIVE CLAMP:
+        // Check if this move would push us underground
+        if (camera.position.y + move.y < 0.5) {
+            // If it would, just set Y to the floor exactly
+            const distanceToFloor = 0.5 - camera.position.y;
+            // Move Y is negative, so we limit it to the remaining distance
+            // Actually, simplest is to just zero out the Y component if we are too low
+            move.y = 0; 
+            camera.position.y = 0.5; // Snap to floor
+        }
+
         camera.position.add(move);
-        controls.target.add(move);
+        controls.target.add(move); // Now target stops when camera stops!
     }
   } 
-  // MODE B: FPS (First Person)
+
+  // --- MODE B: FPS (First Person) ---
   else if (mode === 'FPS') {
-    // Negate Z so 'Forward' means into the screen
     const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
     const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
 
     if (keyState['KeyW'] || keyState['ArrowUp']) move.add(forward);
     if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
+    if (keyState['KeyD'] || keyState['ArrowRight']) move.sub(right); 
+    if (keyState['KeyA'] || keyState['ArrowLeft']) move.add(right);  
     
-    // FIX: Inverted the add/sub logic for A/D here
-    if (keyState['KeyD'] || keyState['ArrowRight']) move.sub(right); // Now moves Right
-    if (keyState['KeyA'] || keyState['ArrowLeft']) move.add(right);  // Now moves Left
-    
-    // Q and E for Up/Down (Levitation)
     if (keyState['KeyE']) move.y += 1;
     if (keyState['KeyQ']) move.y -= 1;
 
     if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(moveSpeed);
         player.position.add(move);
+
+        // FPS Clamp (Feet on ground)
+        if (player.position.y < 0) {
+            player.position.y = 0;
+        }
     }
+    
+    // Sync Camera
     player.rotation.y = yaw;
     camera.position.copy(player.position).add(headOffset);
     camera.rotation.order = "YXZ";
@@ -424,14 +443,70 @@ function updatePlayerAndCamera() {
   }
 }
 
+// --- DEV TOOLS UI ---
+const infoDiv = document.createElement('div');
+infoDiv.style.position = 'absolute';
+infoDiv.style.top = '10px';
+infoDiv.style.left = '10px';
+infoDiv.style.color = 'white';
+infoDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+infoDiv.style.padding = '10px';
+infoDiv.style.fontFamily = 'monospace';
+infoDiv.style.pointerEvents = 'none'; // Click-through
+document.body.appendChild(infoDiv);
+
+function updateDevUI() {
+    const px = camera.position.x.toFixed(2);
+    const py = camera.position.y.toFixed(2);
+    const pz = camera.position.z.toFixed(2);
+
+    let tx, ty, tz;
+
+    // Calculate "Target" based on current mode
+    if (mode === 'ORBIT') {
+        tx = controls.target.x.toFixed(2);
+        ty = controls.target.y.toFixed(2);
+        tz = controls.target.z.toFixed(2);
+    } else {
+        // In FPS mode, calculate a virtual target 20 units in front
+        const fwd = new THREE.Vector3();
+        camera.getWorldDirection(fwd);
+        const target = camera.position.clone().add(fwd.multiplyScalar(20));
+        tx = target.x.toFixed(2);
+        ty = target.y.toFixed(2);
+        tz = target.z.toFixed(2);
+    }
+
+    const modeColor = mode === 'ORBIT' ? '#ffff00' : '#00ff00';
+
+    infoDiv.innerHTML = `
+        <strong>Mode:</strong> <span style="color:${modeColor}">${mode}</span> <br>
+        <small>(Press 'M' to toggle)</small><br>
+        <hr style="opacity:0.3">
+        <strong>Camera:</strong> ${px}, ${py}, ${pz} <br>
+        <strong>Target:</strong> ${tx}, ${ty}, ${tz} <br>
+        <small>Press 'P' to log to console</small>
+    `;
+
+    // Handle 'P' Key to Print
+    if (keyState['KeyP']) {
+        console.log(`// ${mode} Snapshot`);
+        console.log(`const pos = new THREE.Vector3(${px}, ${py}, ${pz});`);
+        console.log(`const target = new THREE.Vector3(${tx}, ${ty}, ${tz});`);
+        keyState['KeyP'] = false; // Prevent console spam
+    }
+}
+
 function animate() {
   requestAnimationFrame(animate);
   TWEEN.update();
+  
   updatePlayerAndCamera();
+  updateDevUI(); // <--- Add this line
+  
   if (mode === 'ORBIT') controls.update();
   renderer.render(scene, camera);
 }
-
 
 // 5. Handle Window Resize
 window.addEventListener('resize', () => {
