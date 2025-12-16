@@ -70,6 +70,19 @@ controls.target.set(0, 10, 0); // Focus the camera on the center-mass of the caf
 controls.maxPolarAngle = Math.PI / 2 + 0.1; // 90 degrees + a slight downward tilt
 controls.update();
 
+controls.target.set(0, 10, 0);
+controls.maxPolarAngle = Math.PI / 2 + 0.1;
+controls.update();
+
+// --- PLAYER / CHARACTER ---
+const player = new THREE.Object3D();
+player.position.set(0, 0, 20);
+scene.add(player);
+
+// Camera height relative to character
+const headOffset = new THREE.Vector3(0, 12, 0);
+
+
 // --- Ground Plane Setup (Grass and Flowers) ---
 
 // 1. Create a texture loader
@@ -181,43 +194,234 @@ loader.load(
   }
 );
 
-// --- Interactivity: Raycasting Setup ---
+
+// --- CAMERA POSITIONS (Restored from your snippet) ---
+const outsidePos = new THREE.Vector3(0, 35, 60);
+const doorwayThreshold = new THREE.Vector3(-10, 12, 15); // Directly in front of door
+const insidePos = new THREE.Vector3(-4.16, 11.15, 8.91);          // Deep inside cafe
+
+const outsideLookAt = new THREE.Vector3(0, 10, 0);
+const insideLookAt = new THREE.Vector3(9.1, 10, -40);
+
+// --- CONTROL VARIABLES ---
+let mode = 'ORBIT'; // 'ORBIT' or 'FPS'
+let isCameraSequencing = false; // Flag to pause controls during door animation
+
+const keyState = {};
+const moveSpeed = 0.6;
+const lookSpeed = 0.002;
+
+// yaw = character turning, pitch = looking up/down
+let yaw = 0;
+let pitch = 0;
+const maxPitch = Math.PI / 2 - 0.05;
+
+// mouse drag state
+let pointerDown = false;
+let draggingLook = false;
+let dragDist = 0;
+let last = { x: 0, y: 0 };
+
+// --- INTERACTIVITY: Raycasting & Door Logic ---
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
-let isDoorOpen = false; // State variable for the door
+let isDoorOpen = false; 
 
 function onPointerClick(event) {
     if (!window.doorMesh) return;
+    
+    // Ignore click if we are dragging the mouse (Looking around)
+    if (draggingLook && mode === 'FPS') return;
 
     pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(pointer, camera);
-
-    // The second 'true' parameter allows raycasting to check all meshes inside the door group
     const intersects = raycaster.intersectObject(window.doorRoot, true);
+
     if (intersects.length > 0) {
-    isDoorOpen = !isDoorOpen;
+        isDoorOpen = !isDoorOpen;
 
-    const targetRotation = isDoorOpen ? Math.PI / 2 : 0; // flip sign if needed
+        const targetRotation = isDoorOpen ? Math.PI / 2 : 0; 
 
-    new TWEEN.Tween(window.doorMesh.rotation)
-        .to({ y: targetRotation }, 500)
-        .easing(TWEEN.Easing.Quadratic.Out)
-        .start();
+        // 1. OPEN THE DOOR (Animation)
+        new TWEEN.Tween(window.doorMesh.rotation)
+            .to({ y: targetRotation }, 1000)
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .onComplete(() => {
+                // 2. CAMERA SEQUENCE (Only if opening)
+                if (isDoorOpen) {
+                    isCameraSequencing = true; // PAUSE USER CONTROLS
+
+                    // TIMING CONTROLS (Restored from your snippet)
+                    const toDoorwayDuration = 1350; 
+                    const waitAtDoor = 50;         
+                    const moveInsideDuration = 1500; 
+
+                    // A. Move to the threshold
+                    const toDoorway = new TWEEN.Tween(camera.position)
+                        .to({ x: doorwayThreshold.x, y: doorwayThreshold.y, z: doorwayThreshold.z }, toDoorwayDuration)
+                        .easing(TWEEN.Easing.Quadratic.Out);
+
+                    // B. Move through the door
+                    const goInside = new TWEEN.Tween(camera.position)
+                        .to({ x: insidePos.x, y: insidePos.y, z: insidePos.z }, moveInsideDuration)
+                        .delay(waitAtDoor) 
+                        .easing(TWEEN.Easing.Quadratic.InOut)
+                        .onComplete(() => {
+                            // Sequence finished: Restore controls
+                            isCameraSequencing = false; 
+                            
+                            // SYNC: Move the invisible 'player' to the new camera spot
+                            // so if you switch to FPS mode, you are already inside.
+                            player.position.set(camera.position.x, 0, camera.position.z);
+                            controls.target.copy(insideLookAt); 
+                        });
+
+                    // C. Coordinate the Look-At
+                    new TWEEN.Tween(controls.target)
+                        .to({ x: insideLookAt.x, y: insideLookAt.y, z: insideLookAt.z }, toDoorwayDuration + waitAtDoor + moveInsideDuration)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .start();
+
+                    toDoorway.chain(goInside);
+                    toDoorway.start();
+                } else {
+                    // EXITING: Move straight back out
+                    new TWEEN.Tween(camera.position).to(outsidePos, 1500).start();
+                    new TWEEN.Tween(controls.target).to(outsideLookAt, 1500).start();
+                    
+                    // Reset player position for next time
+                    player.position.set(outsidePos.x, 0, outsidePos.z);
+                }
+            })
+            .start();
     }
 }
 
-// Attach the event listener to the renderer's canvas
+// Attach the click listener
 renderer.domElement.addEventListener( 'click', onPointerClick );
 
-// --- Animation Loop ---
-function animate() {
-  requestAnimationFrame(animate); // Keep looping at screen refresh rate
-  controls.update(); // Only required if controls.enableDamping is set to true
-  TWEEN.update();
-  renderer.render(scene, camera); // Draw the frame
+
+// --- MODE SWITCHING & INPUTS ---
+function setMode(newMode) {
+  mode = newMode;
+
+  if (mode === 'FPS') {
+    controls.enabled = false;
+    // Sync Player to current Camera position
+    player.position.set(camera.position.x, 0, camera.position.z);
+    
+    // Sync Yaw to Camera direction
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    yaw = Math.atan2(fwd.x, fwd.z);
+    pitch = 0;
+
+  } else {
+    controls.enabled = true;
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    controls.target.copy(camera.position).add(fwd.multiplyScalar(20));
+    controls.update();
+  }
 }
+
+window.addEventListener('keydown', (e) => {
+  keyState[e.code] = true;
+  if (e.code === 'KeyC') setMode(mode === 'ORBIT' ? 'FPS' : 'ORBIT');
+  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+}, { passive: false });
+
+window.addEventListener('keyup', (e) => keyState[e.code] = false);
+
+// FPS Look Logic
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (mode !== 'FPS') return;
+  pointerDown = true;
+  draggingLook = false;
+  dragDist = 0;
+  last.x = e.clientX;
+  last.y = e.clientY;
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!pointerDown || mode !== 'FPS') return;
+  const dx = e.clientX - last.x;
+  const dy = e.clientY - last.y;
+  dragDist += Math.abs(dx) + Math.abs(dy);
+  if (dragDist > 3) draggingLook = true;
+  if (draggingLook) {
+    yaw -= dx * lookSpeed;
+    pitch -= dy * lookSpeed;
+    pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
+  }
+  last.x = e.clientX;
+  last.y = e.clientY;
+});
+
+renderer.domElement.addEventListener('pointerup', () => pointerDown = false);
+
+
+// --- MAIN UPDATE LOOP ---
+function updatePlayerAndCamera() {
+  // If door sequence is playing, disable manual movement
+  if (isCameraSequencing) return;
+
+  const move = new THREE.Vector3();
+
+  // MODE A: ORBIT (Flying Camera)
+  if (mode === 'ORBIT') {
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.y = 0; 
+    forward.normalize();
+    const right = new THREE.Vector3();
+    right.crossVectors(forward, camera.up).normalize();
+
+    if (keyState['KeyW'] || keyState['ArrowUp']) move.add(forward);
+    if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
+    if (keyState['KeyD'] || keyState['ArrowRight']) move.add(right);
+    if (keyState['KeyA'] || keyState['ArrowLeft']) move.sub(right);
+
+    if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(moveSpeed);
+        camera.position.add(move);
+        controls.target.add(move);
+    }
+  } 
+  // MODE B: FPS (First Person)
+  else if (mode === 'FPS') {
+    // Negate Z so 'Forward' means into the screen
+    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
+    const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+
+    if (keyState['KeyW'] || keyState['ArrowUp']) move.add(forward);
+    if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
+    if (keyState['KeyD'] || keyState['ArrowRight']) move.add(right);
+    if (keyState['KeyA'] || keyState['ArrowLeft']) move.sub(right);
+
+    if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(moveSpeed);
+        player.position.add(move);
+    }
+    player.rotation.y = yaw;
+    camera.position.copy(player.position).add(headOffset);
+    camera.rotation.order = "YXZ";
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  TWEEN.update();
+  updatePlayerAndCamera();
+  if (mode === 'ORBIT') controls.update();
+  renderer.render(scene, camera);
+}
+
 
 // 5. Handle Window Resize
 window.addEventListener('resize', () => {
