@@ -244,76 +244,144 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let isDoorOpen = false; 
 
+// --- UNIFIED CLICK HANDLER (Door + Pastries) ---
 function onPointerClick(event) {
-    if (!window.doorMesh) return;
+    // 1. Basic Checks
+    if (draggingLook && mode === 'FPS') return; // Don't click if dragging mouse
     
-    // Ignore click if we are dragging the mouse (Looking around)
-    if (draggingLook && mode === 'FPS') return;
-
+    // 2. Setup Raycaster
     pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
     raycaster.setFromCamera(pointer, camera);
-    const intersects = raycaster.intersectObject(window.doorRoot, true);
 
-    if (intersects.length > 0) {
-        isDoorOpen = !isDoorOpen;
-
-        const targetRotation = isDoorOpen ? Math.PI / 2 : 0; 
-
-        // 1. OPEN THE DOOR (Animation)
-        new TWEEN.Tween(window.doorMesh.rotation)
-            .to({ y: targetRotation }, 1000)
-            .easing(TWEEN.Easing.Quadratic.InOut)
-            .onComplete(() => {
-                // 2. CAMERA SEQUENCE (Only if opening)
-                if (isDoorOpen) {
-                    isCameraSequencing = true; // PAUSE USER CONTROLS
-
-                    // TIMING CONTROLS (Restored from your snippet)
-                    const toDoorwayDuration = 1350; 
-                    const waitAtDoor = 50;         
-                    const moveInsideDuration = 1500; 
-
-                    // A. Move to the threshold
-                    const toDoorway = new TWEEN.Tween(camera.position)
-                        .to({ x: doorwayThreshold.x, y: doorwayThreshold.y, z: doorwayThreshold.z }, toDoorwayDuration)
-                        .easing(TWEEN.Easing.Quadratic.Out);
-
-                    // B. Move through the door
-                    const goInside = new TWEEN.Tween(camera.position)
-                        .to({ x: insidePos.x, y: insidePos.y, z: insidePos.z }, moveInsideDuration)
-                        .delay(waitAtDoor) 
-                        .easing(TWEEN.Easing.Quadratic.InOut)
-                        .onComplete(() => {
-                            // Sequence finished: Restore controls
-                            isCameraSequencing = false; 
-                            
-                            // SYNC: Move the invisible 'player' to the new camera spot
-                            // so if you switch to FPS mode, you are already inside.
-                            player.position.set(camera.position.x, 0, camera.position.z);
-                            controls.target.copy(insideLookAt); 
-                        });
-
-                    // C. Coordinate the Look-At
-                    new TWEEN.Tween(controls.target)
-                        .to({ x: insideLookAt.x, y: insideLookAt.y, z: insideLookAt.z }, toDoorwayDuration + waitAtDoor + moveInsideDuration)
-                        .easing(TWEEN.Easing.Quadratic.Out)
-                        .start();
-
-                    toDoorway.chain(goInside);
-                    toDoorway.start();
-                } else {
-                    // EXITING: Move straight back out
-                    new TWEEN.Tween(camera.position).to(outsidePos, 1500).start();
-                    new TWEEN.Tween(controls.target).to(outsideLookAt, 1500).start();
-                    
-                    // Reset player position for next time
-                    player.position.set(outsidePos.x, 0, outsidePos.z);
-                }
-            })
-            .start();
+    // --- CHECK 1: IS IT THE DOOR? ---
+    if (window.doorRoot) {
+        const doorIntersects = raycaster.intersectObject(window.doorRoot, true);
+        if (doorIntersects.length > 0) {
+            handleDoorInteraction();
+            return; // Stop here, don't check for pastries if we clicked the door
+        }
     }
+
+    // --- CHECK 2: IS IT A PASTRY? ---
+    // Check everything in the scene
+    const sceneIntersects = raycaster.intersectObjects(scene.children, true);
+    
+    if (sceneIntersects.length > 0) {
+        
+      // --- NEW LOGIC: IGNORE GLASS ---
+      // Instead of taking intersects[0] (which is the glass),
+      // we find the first object in the list that is NOT the glass.
+      const hit = sceneIntersects.find(hit => !hit.object.name.includes('Vidro_balcao'));
+      
+      // If we found a valid object behind the glass
+      if (hit) {
+          const object = hit.object;
+          console.log("Clicked Object:", object.name); // Debug log
+
+          let title = "";
+          let desc = "";
+
+          // UPDATE THESE NAMES based on your console logs!
+          if (object.name.includes('croissant')) {
+              title = "Butter Croissant";
+              desc = "Layers of flaky pastry made with 100% French butter.";
+          } else if (object.name.includes('donut')) {
+              title = "Classic Glazed Donut";
+              desc = "A timeless classic. Fluffy, sweet, and melted to perfection.";
+          } else if (object.name.includes('cupcake')) {
+              title = "Vanilla Cupcake";
+              desc = "Light vanilla sponge topped with creamy buttercream frosting and fruit.";
+          } else if (object.name.includes('tart')) {
+              title = "Cream Tart";
+              desc = "A crisp pastry shell filled with custard and topped with fresh cream.";
+          } else if (object.name.includes('cake')) {
+              title = "Tiered Cake";
+              desc = "Fresh fruit filling and cream between airy sponge layers.";
+          } else if (object.name.includes('bun')) {
+              title = "Sweet Bun";
+              desc = "Soft bun filled with fresh fruit and cream.";
+          }
+          // If it was a known pastry, trigger menu
+          if (title !== "") {
+              focusOnMenu(title, desc);
+          }
+      }
+    }
+}
+
+// Helper: The Door Animation Logic (Moved here for cleanliness)
+function handleDoorInteraction() {
+    isDoorOpen = !isDoorOpen;
+    const targetRotation = isDoorOpen ? Math.PI / 2 : 0; 
+
+    new TWEEN.Tween(window.doorMesh.rotation)
+        .to({ y: targetRotation }, 1000)
+        .easing(TWEEN.Easing.Quadratic.InOut)
+        .onComplete(() => {
+            if (isDoorOpen) {
+                isCameraSequencing = true; 
+                
+                // Door Sequence Timing
+                const toDoorwayDuration = 1350; 
+                const waitAtDoor = 50;         
+                const moveInsideDuration = 1500; 
+
+                const toDoorway = new TWEEN.Tween(camera.position)
+                    .to({ x: doorwayThreshold.x, y: doorwayThreshold.y, z: doorwayThreshold.z }, toDoorwayDuration)
+                    .easing(TWEEN.Easing.Quadratic.Out);
+
+                const goInside = new TWEEN.Tween(camera.position)
+                    .to({ x: insidePos.x, y: insidePos.y, z: insidePos.z }, moveInsideDuration)
+                    .delay(waitAtDoor) 
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onComplete(() => {
+                        isCameraSequencing = false; 
+                        player.position.set(camera.position.x, 0, camera.position.z);
+                        controls.target.copy(insideLookAt); 
+                    });
+
+                new TWEEN.Tween(controls.target)
+                    .to({ x: insideLookAt.x, y: insideLookAt.y, z: insideLookAt.z }, toDoorwayDuration + waitAtDoor + moveInsideDuration)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .start();
+
+                toDoorway.chain(goInside);
+                toDoorway.start();
+            } else {
+                // Exit Logic
+                new TWEEN.Tween(camera.position).to(outsidePos, 1500).start();
+                new TWEEN.Tween(controls.target).to(outsideLookAt, 1500).start();
+                player.position.set(outsidePos.x, 0, outsidePos.z);
+            }
+        })
+        .start();
+}
+
+// Helper: The Menu Animation Logic
+function focusOnMenu(title, description) {
+    menuContent.innerHTML = `<h1>${title}</h1><p>${description}</p>`;
+    
+    // 1. PAUSE CONTROLS (Fixes the FPS issue)
+    // This stops updatePlayerAndCamera from overwriting the Tween
+    isCameraSequencing = true; 
+    controls.enabled = false; 
+
+    // 2. Move Camera to the "Menu View" position
+    new TWEEN.Tween(camera.position)
+        .to(menuViewPos, 1500)
+        .easing(TWEEN.Easing.Cubic.Out)
+        .start();
+
+    // 3. Rotate Camera to look at the board
+    new TWEEN.Tween(controls.target)
+        .to(menuViewTarget, 1500)
+        .easing(TWEEN.Easing.Cubic.Out)
+        .onComplete(() => {
+            // Show the popup only after arriving
+            menuPopup.style.display = 'block';
+        })
+        .start();
 }
 
 // Attach the click listener
@@ -405,6 +473,7 @@ function updatePlayerAndCamera() {
     const right = new THREE.Vector3();
     right.crossVectors(forward, camera.up).normalize();
 
+    // WASD Movement
     if (keyState['KeyW'] || keyState['ArrowUp']) move.add(forward);
     if (keyState['KeyS'] || keyState['ArrowDown']) move.sub(forward);
     if (keyState['KeyD'] || keyState['ArrowRight']) move.add(right);
@@ -413,22 +482,24 @@ function updatePlayerAndCamera() {
     // Q/E Movement
     if (keyState['KeyE']) move.y += 1;
     if (keyState['KeyQ']) {
-        if (camera.position.y > 0.1) {
+        // Only add downward force if we are safely above ground
+        if (camera.position.y > 0.5) {
             move.y -= 1;
         }
     }
 
+    // Apply Movement
     if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(moveSpeed);
-        
-        // PREDICTIVE CLAMP (Orbit)
-        if (camera.position.y + move.y < 0.5) {
-            move.y = 0; 
-            camera.position.y = 0.5; 
-        }
-
         camera.position.add(move);
-        controls.target.add(move); 
+        controls.target.add(move);
+    }
+
+    // --- CRITICAL FIX: UNCONDITIONAL FLOOR CLAMP ---
+    // This is now OUTSIDE the movement block, so it runs constantly.
+    // It prevents mouse zooming/rotating from pushing you underground.
+    if (camera.position.y < 0.5) {
+        camera.position.y = 0.5;
     }
   } 
 
@@ -449,7 +520,7 @@ function updatePlayerAndCamera() {
         move.normalize().multiplyScalar(moveSpeed);
         player.position.add(move);
 
-        // FPS Clamp
+        // FPS Clamp (Feet on ground)
         if (player.position.y < 0) {
             player.position.y = 0;
         }
@@ -459,11 +530,11 @@ function updatePlayerAndCamera() {
     player.rotation.y = yaw;
     camera.position.copy(player.position).add(headOffset);
     
-    // FORCE UPRIGHT ORIENTATION
+    // Force Upright
     camera.rotation.order = "YXZ";
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
-    camera.rotation.z = 0; // Always force roll to 0
+    camera.rotation.z = 0; 
   }
 }
 
@@ -517,6 +588,51 @@ function updateDevUI() {
         keyState['KeyP'] = false; 
     }
 }
+
+// --- MENU INFO UI ---
+const menuPopup = document.createElement('div');
+menuPopup.style.position = 'absolute';
+menuPopup.style.top = '50%';
+menuPopup.style.left = '51.6%';
+menuPopup.style.transform = 'translate(-50%, -50%)';
+menuPopup.style.width = '783px';
+menuPopup.style.height = '510px';
+menuPopup.style.padding = '30px';
+menuPopup.style.backgroundColor = '#433524'; // Solid color you requested
+menuPopup.style.color = '#ffffff'; // White text for contrast
+
+menuPopup.style.fontFamily = 'serif';
+menuPopup.style.textAlign = 'center';
+menuPopup.style.display = 'none'; 
+menuPopup.style.zIndex = '100';
+document.body.appendChild(menuPopup);
+
+// Close Button for the menu
+const closeBtn = document.createElement('button');
+closeBtn.innerText = "Close Menu";
+closeBtn.style.marginTop = '20px';
+closeBtn.style.padding = '10px 20px';
+closeBtn.style.cursor = 'pointer';
+closeBtn.onclick = () => {
+    // Hide menu
+    menuPopup.style.display = 'none';
+    
+    // 1. Re-enable User Controls
+    isCameraSequencing = false; // <--- IMPORTANT: Lets FPS controls work again
+    controls.enabled = true; 
+    
+    // 2. Optional: If in FPS mode, the camera will snap back to the player body.
+    // If you want to tween back, that's more complex, but snapping is standard.
+};
+menuPopup.appendChild(closeBtn);
+
+const menuContent = document.createElement('div');
+menuPopup.appendChild(menuContent);
+
+// --- MENU CAMERA POSITIONS ---
+// UPDATE THESE after using 'P' to find the perfect spot
+const menuViewPos = new THREE.Vector3(0.01, 15.7, -16.29); 
+const menuViewTarget = new THREE.Vector3(0.00, 15.7, -20.00);
 
 function animate() {
   requestAnimationFrame(animate);
