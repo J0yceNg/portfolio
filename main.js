@@ -362,23 +362,35 @@ function handleDoorInteraction() {
 function focusOnMenu(title, description) {
     menuContent.innerHTML = `<h1>${title}</h1><p>${description}</p>`;
     
-    // 1. PAUSE CONTROLS (Fixes the FPS issue)
-    // This stops updatePlayerAndCamera from overwriting the Tween
+    // --- SAVE CURRENT LOCATION (For Orbit Mode Return) ---
+    savedReturnPos.copy(camera.position);
+    savedReturnTarget.copy(controls.target);
+
+    // 1. Pause Controls
     isCameraSequencing = true; 
     controls.enabled = false; 
 
-    // 2. Move Camera to the "Menu View" position
+    // FPS Fix: Ensure start point is correct
+    if (mode === 'FPS') {
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        controls.target.copy(camera.position).add(forward.multiplyScalar(10));
+    }
+
+    // 2. Move Camera Position
     new TWEEN.Tween(camera.position)
         .to(menuViewPos, 1500)
         .easing(TWEEN.Easing.Cubic.Out)
         .start();
 
-    // 3. Rotate Camera to look at the board
+    // 3. Move Camera Target
     new TWEEN.Tween(controls.target)
         .to(menuViewTarget, 1500)
         .easing(TWEEN.Easing.Cubic.Out)
+        .onUpdate(() => {
+            camera.lookAt(controls.target);
+        })
         .onComplete(() => {
-            // Show the popup only after arriving
             menuPopup.style.display = 'block';
         })
         .start();
@@ -613,16 +625,34 @@ closeBtn.innerText = "Close Menu";
 closeBtn.style.marginTop = '20px';
 closeBtn.style.padding = '10px 20px';
 closeBtn.style.cursor = 'pointer';
+
 closeBtn.onclick = () => {
     // Hide menu
     menuPopup.style.display = 'none';
-    
-    // 1. Re-enable User Controls
-    isCameraSequencing = false; // <--- IMPORTANT: Lets FPS controls work again
-    controls.enabled = true; 
-    
-    // 2. Optional: If in FPS mode, the camera will snap back to the player body.
-    // If you want to tween back, that's more complex, but snapping is standard.
+
+    // --- CHECK MODE TO DECIDE RETURN BEHAVIOR ---
+    if (mode === 'ORBIT') {
+        // ANIMATE BACK to where we were
+        new TWEEN.Tween(camera.position)
+            .to(savedReturnPos, 1000) // 1 second return
+            .easing(TWEEN.Easing.Cubic.Out)
+            .start();
+
+        new TWEEN.Tween(controls.target)
+            .to(savedReturnTarget, 1000)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onComplete(() => {
+                // Only give control back after arriving
+                isCameraSequencing = false;
+                controls.enabled = true;
+            })
+            .start();
+    } else {
+        // FPS MODE: Just release the lock
+        // The update loop will automatically snap camera to player body instantly
+        isCameraSequencing = false;
+        controls.enabled = true; 
+    }
 };
 menuPopup.appendChild(closeBtn);
 
@@ -633,6 +663,9 @@ menuPopup.appendChild(menuContent);
 // UPDATE THESE after using 'P' to find the perfect spot
 const menuViewPos = new THREE.Vector3(0.01, 15.7, -16.29); 
 const menuViewTarget = new THREE.Vector3(0.00, 15.7, -20.00);
+
+const savedReturnPos = new THREE.Vector3();
+const savedReturnTarget = new THREE.Vector3();
 
 function animate() {
   requestAnimationFrame(animate);
